@@ -1,0 +1,25 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+web/dist/
+
+# Captured raw responses (large; archive outside git)
+raw/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
