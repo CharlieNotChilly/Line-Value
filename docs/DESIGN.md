@@ -4,12 +4,15 @@
 
 Sportsbooks price the same game differently, and each price includes a margin (the "vig"). If you remove each book's margin and take the consensus of the other books, you get an estimate of the true probability. A price better than that consensus is a candidate mispricing. The standard test of whether those flags mean anything is **closing-line value**: does the flagged price beat the consensus right before the game starts?
 
+Books also disagree enough that, occasionally, the best price for every outcome of one game comes from different books and the implied probabilities sum to less than 1. Backing every outcome at those prices locks in a profit whichever side wins: a **cross-book arbitrage**. These windows are rare and short-lived, and most apparent ones are just stale quotes, so detecting real ones is a data-freshness problem as much as a math problem.
+
 Doing this well is a data-systems problem: many sources, frequent updates, a tight API budget, crash-safe processing, fast reads, and an evaluation that cannot leak future data.
 
 ## Goals
 
 - Ingest h2h odds for 4 sports across 4 regions from The Odds API without losing or duplicating data, within the API quota.
 - Compute de-vigged, leave-one-out consensus probabilities and flag high-EV quotes as data arrives.
+- Detect cross-book arbitrage from fresh quotes only, with the equal-payout stake split, and measure how often windows open and how long they last.
 - Serve current markets and flags with low latency to a dashboard.
 - Measure the system (throughput, latency) and the model (closing-line value against matched controls) with reproducible scripts.
 
@@ -59,6 +62,7 @@ flowchart LR
 | `latest_quotes` | PK (`event_id`, `book_key`, `outcome`), `price`, `book_last_update` | Current price; makes "did it change?" one lookup |
 | `fair_prices` | PK (`event_id`, `book_key`, `outcome`), `fair_p`, `consensus_p`, `ev`, `n_books`, `computed_at` | Recomputed per touched event |
 | `flags` | `id`, `event_id`, `book_key`, `outcome`, `price`, `consensus_p`, `ev`, `n_books`, `flagged_at`, `raw_id` | Append-only history used by the backtest |
+| `arbitrages` | `id`, `event_id`, `legs` (jsonb: outcome, book, price, `book_last_update`, stake share), `margin`, `opened_at`, `closed_at` | One row per window; `closed_at` is null while open. Partial unique index on (`event_id`) where `closed_at` is null |
 
 Idempotency comes from the unique key plus `INSERT ... ON CONFLICT DO NOTHING`, and from updating `latest_quotes` only when `book_last_update` is newer.
 
@@ -68,7 +72,7 @@ Idempotency comes from the unique key plus `INSERT ... ON CONFLICT DO NOTHING`, 
 |---|---|---|
 | `odds:raw` | Stream | One entry per raw response: `{sport, path, received_at}` (payload stays on disk) |
 | group `normalizers` | Consumer group | At-least-once delivery; pending entries list is the crash-recovery log |
-| `cache:events`, `cache:event:{id}`, `cache:flags` | String (JSON) | TTL 5 s; deleted by the normalizer after commit |
+| `cache:events`, `cache:event:{id}`, `cache:flags`, `cache:arbs` | String (JSON) | TTL 5 s; deleted by the normalizer after commit |
 | `budget:credits` | Hash | Last seen `used`, `remaining`, `last` from response headers |
 
 ## Key decisions and trade-offs
@@ -82,6 +86,8 @@ Idempotency comes from the unique key plus `INSERT ... ON CONFLICT DO NOTHING`, 
 | Daily partitions on `quote_changes` | Time-range queries (backtest, charts) prune partitions; old days can be detached | One big table + index |
 | Leave-one-out median consensus | A book can't vote for its own price, and the median resists one stale or wild book | Mean (outlier-sensitive); a single "sharp" book (one point of failure) |
 | Frozen threshold on a calibration window | Prevents tuning on the test window, the most common backtest leak | Choosing τ on all data |
+| Freshness window on arbitrage legs | Books update at different times; a stale leg creates a phantom arbitrage. Requiring all legs within 60 s of each other trades a few missed windows for far fewer false ones | Trusting the latest stored price for every book |
+| Store arbitrage as windows, not snapshots | Open/close rows make "how often and how long" a simple query and keep the table small | Logging every snapshot where an arbitrage holds |
 | Matched controls from the same event and snapshot | Controls share the game, time, and market state, so the comparison isolates the flag | Comparing to 50%: ignores that some prices beat the close by chance or by timing |
 | LLM explains, never decides | Flags come from deterministic math; the model only phrases them, and a validator rejects invented numbers | Letting the model rank opportunities: not reproducible, not testable |
 
@@ -110,6 +116,7 @@ Idempotency comes from the unique key plus `INSERT ... ON CONFLICT DO NOTHING`, 
 | GET | `/events?sport=` | Upcoming events with best price and consensus per outcome |
 | GET | `/events/{id}` | Per-book prices, fair probabilities, and line history |
 | GET | `/flags?since=` | Current flags sorted by EV |
+| GET | `/arbs` | Open arbitrage windows sorted by margin, with legs and stake split |
 | GET | `/flags/{id}/explanation` | Validated explanation text, if any |
 
 ## Folder structure
@@ -124,7 +131,7 @@ Line-Value/
 │   ├── db/                      SQLAlchemy models, Alembic migrations, partition helper
 │   ├── poller/                  odds client, budget guard, backoff, raw writer, publisher
 │   ├── normalizer/              consumer loop, parser, upserts, reclaim
-│   ├── pricing/                 devig.py, consensus.py, ev.py (pure)
+│   ├── pricing/                 devig.py, consensus.py, ev.py, arbitrage.py (pure)
 │   ├── api/                     FastAPI app, cache layer, schemas
 │   └── explain/                 payload builder, OpenAI client, number validator
 ├── bin/                         live_report, replay, backtest, explain, summarize
@@ -149,3 +156,5 @@ Line-Value/
 6. Why partition `quote_changes` by day? What does partition pruning buy you?
 7. How do you keep the cache consistent with the database? What is the staleness bound?
 8. Why is the LLM not allowed to decide what gets flagged?
+9. Why do most apparent arbitrages disappear when you check timestamps? How did you choose the 60 s freshness window, and what does it cost you?
+10. Prove the equal-payout stake split returns the same amount for every outcome. What breaks if one book limits your stake?

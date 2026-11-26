@@ -10,9 +10,9 @@ Spec IDs (F1.1, F2.3, …) refer to [SPEC.md](SPEC.md).
 | 1 | Skeleton | `docker compose up` runs postgres, redis, api (`/health`), poller, normalizer stubs; CI runs lint, types, tests | — |
 | 2 | Poller | Fixture-based tests pass; one live poll stores a raw file, a manifest line, and a stream entry | F1.1, F1.2, F1.6 |
 | 3 | Normalizer | Stream → PostgreSQL works; duplicate and crash tests pass | F1.3–F1.5 |
-| 4 | Pricing engine | Property and unit tests pass; flags appear for live data | F2.1–F2.3 |
-| 5 | API, cache, dashboard | Endpoints served from cache; dashboard shows flags and line movement | F2.4, F2.5 |
-| 6 | Live run (28 days, runs in the background) | `bin/live_report` writes `results/live/` with no unexplained gaps | F1.7 |
+| 4 | Pricing engine + arbitrage | Property and unit tests pass; flags and arbitrage windows appear for live data | F2.1–F2.3, F2.7 |
+| 5 | API, cache, dashboard | Endpoints served from cache; dashboard shows flags, arbitrage windows, and line movement | F2.4, F2.5, F2.8 |
+| 6 | Live run (28 days, runs in the background) | `bin/live_report` writes `results/live/` (including `arbitrage.md`) with no unexplained gaps | F1.7, F2.9 |
 | 7 | Replay | `bin/replay` reproduces the live database and reports `[R]` | F1.8 |
 | 8 | API load test | k6 run saved; error rate 0 | F2.6 |
 | 9 | Backtest | Frozen τ, matched controls, Wilson intervals saved | F3.1–F3.3 |
@@ -118,20 +118,29 @@ leave_one_out_consensus(fair_by_book, book) -> median of the OTHER books
 or None if fewer than 5 others, ev(consensus_p, price). In the normalizer
 transaction, recompute fair_prices for every touched event and append to
 flags when ev >= FLAG_THRESHOLD (env, provisional until phase 9).
+Add arbitrage(event_quotes, window_s=60, m_min=0.005): best price per outcome
+across books, using only legs whose book_last_update is within 60 s of the
+newest leg; margin m = 1 - sum(1/best); return legs and stake shares
+(proportional to 1/best) when m >= m_min. In the same transaction, open an
+arbitrages row when one appears and set closed_at when it disappears.
 Hypothesis property tests: devig sums to 1 within 1e-9 for any valid odds;
-consensus never includes the book itself; ev is 0 when price == 1/p.
-Done when: F2.1-F2.3 tests pass and flags appear for live events.
+consensus never includes the book itself; ev is 0 when price == 1/p; for any
+detected arbitrage, the stake split pays more than its cost on every outcome.
+Unit test: an arbitrage that depends on one stale leg is not reported.
+Done when: F2.1-F2.3 and F2.7 tests pass and flags appear for live events.
 ```
 
 ### Phase 5: API, cache, dashboard
 ```
 FastAPI endpoints from DESIGN.md API table with pydantic response models.
-Read-through cache: cache:events, cache:event:{id}, cache:flags with TTL 5 s;
+Read-through cache: cache:events, cache:event:{id}, cache:flags, cache:arbs
+with TTL 5 s;
 the normalizer deletes affected keys after commit; log hit ratio.
 React + TypeScript + Vite dashboard in web/: flags table sorted by EV with
 book, price, consensus, EV, and book count; event page with a per-book
-line-movement chart from quote_changes. Add the web service to compose.
-Done when: F2.4 integration tests pass, and you save a dashboard screenshot
+line-movement chart from quote_changes; an arbitrage panel from GET /arbs with
+margin, legs, and stake split. Add the web service to compose.
+Done when: F2.4 and F2.8 integration tests pass, and you save a dashboard screenshot
 to results/demo/.
 ```
 
@@ -142,6 +151,8 @@ days, gaps (no committed response for a sport for > 3x its interval)
 written to results/live/gaps.csv, distinct bookmaker keys [B], quotes and
 quote changes per day, and ingest latency p50/p95/p99 [F] from
 raw_responses (committed_at - received_at). Write results/live/summary.md.
+Also write results/live/arbitrage.md: arbitrage windows [A], median lifetime
+[D] in seconds, and the margin distribution (F2.9).
 Done when: it runs on the live database and every number in the summary
 comes from a query you can point to.
 ```

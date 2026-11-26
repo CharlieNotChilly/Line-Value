@@ -9,6 +9,7 @@ results/
     summary.md             live-run days, [B] sportsbooks, quotes per day, [F] ingest latency
     gaps.csv               polling gaps per sport
     quota.csv              credits used/remaining per call
+    arbitrage.md           [A] arbitrage windows, [D] median lifetime, margin distribution
   replay/
     summary.md             [R] quotes/s, consumer count, live-vs-replay comparison
   api/
@@ -28,6 +29,7 @@ results/
 | `[B]` sportsbooks | `live/summary.md` |
 | `[R]` quotes/s | `replay/summary.md` |
 | `[F]` ms p95 ingest latency | `live/summary.md` |
+| `[A]` arbitrage windows, `[D]` median lifetime | `live/arbitrage.md` |
 | `[L]` ms p99, `[C]` clients | `api/summary.md` |
 | `[E]` events, `[P]%`, `[Q]%` | `backtest/summary.md` |
 

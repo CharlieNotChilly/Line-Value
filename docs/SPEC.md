@@ -12,7 +12,7 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
   {https://github.com/CharlieNotChilly/Line-Value}
 \resumeItemListStart
   \resumeItem{Built an \textbf{async ingestion pipeline} that normalizes odds from \textbf{[B] sportsbooks} into a unified PostgreSQL schema through at-least-once \textbf{Redis Streams} consumers and idempotent upserts, processing \textbf{[R]} quotes/s in replay at \textbf{[F] ms} p95 ingest latency.}
-  \resumeItem{Designed a \textbf{pricing engine} that removes bookmaker margin to compute leave-one-out consensus probabilities and flags mispriced lines, served from \textbf{Redis}-cached FastAPI endpoints at \textbf{[L] ms} p99 under \textbf{[C]} concurrent clients.}
+  \resumeItem{Designed a \textbf{pricing engine} that removes bookmaker margin to compute leave-one-out consensus probabilities and flags mispriced lines and \textbf{cross-book arbitrage}, served from \textbf{Redis}-cached FastAPI endpoints at \textbf{[L] ms} p99 under \textbf{[C]} concurrent clients.}
   \resumeItem{Backtested flags on \textbf{[E]} live-captured events with a frozen threshold: flagged prices beat the closing consensus \textbf{[P]\%} of the time vs. \textbf{[Q]\%} for matched unflagged prices, with grounded \textbf{OpenAI} explanations for each flag.}
 \resumeItemListEnd
 ```
@@ -21,7 +21,7 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
 
 ```latex
 \resumeItem{Built an \textbf{async ingestion pipeline} that normalizes odds from \textbf{[B] sportsbooks} into a unified PostgreSQL schema through at-least-once \textbf{Redis Streams} consumers and idempotent upserts.}
-\resumeItem{Designed a \textbf{pricing engine} that removes bookmaker margin to compute leave-one-out consensus probabilities and flags mispriced lines, served through Redis-cached FastAPI endpoints and a React dashboard.}
+\resumeItem{Designed a \textbf{pricing engine} that removes bookmaker margin to compute leave-one-out consensus probabilities and flags mispriced lines and cross-book arbitrage, served through Redis-cached FastAPI endpoints and a React dashboard.}
 ```
 
 **If the backtest does not beat the control** (`[P]` ≤ `[Q]`, or the confidence intervals overlap), bullet 3 cannot claim an edge. Rewrite it to report the measured result honestly (for example, "measured closing-line value on [E] events and found no significant edge over matched controls"), or improve the model on the calibration window only and rerun.
@@ -43,6 +43,8 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
 | Runtime mode | Production settings for every measured run (no debug logging, no auto-reload) |
 | Backtest split | Calibration window = first 50% of live-run days; test window = last 50%. Threshold chosen on calibration only, then frozen |
 | Confidence intervals | 95% Wilson intervals for `[P]` and `[Q]` |
+| Arbitrage freshness window | Every leg's `book_last_update` within **60 s** of the newest leg |
+| Minimum arbitrage margin | `m_min` = **0.5%** |
 
 ## Measurement definitions
 
@@ -57,6 +59,9 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
 - **Beats the close**: the flagged price is greater than `1 / closing_consensus_fair_p`.
 - **`[P]`** = share of test-window flags that beat the close. **`[Q]`** = the same share for a control set of unflagged quotes, one per flag, sampled from the same event and snapshot (seeded RNG).
 - **`[E]`** = distinct events in the test window with at least one flag and a closing consensus.
+- **Arbitrage**: for one event, take the best price for each outcome across all books, using only legs inside the freshness window. The margin is `m = 1 − Σ 1/best_price_i`. An arbitrage exists when `m ≥ m_min`. Stakes `s_i ∝ 1/best_price_i` give the same payout whichever outcome wins, and that payout exceeds the total stake by the factor `1/(1 − m)`.
+- **Arbitrage window**: the interval from the first snapshot where an event's arbitrage holds to the first later snapshot where it doesn't. Its **lifetime** is the length of that interval.
+- **`[A]`** = arbitrage windows detected during the live run; **`[D]`** = their median lifetime in seconds.
 
 ## Bullet 1: ingestion
 
@@ -81,6 +86,9 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
 | F2.4 | `GET /events`, `GET /events/{id}`, and `GET /flags` serve from Redis (TTL 5 s, invalidated on change) and fall back to PostgreSQL on a miss | Integration tests; cache hit ratio logged |
 | F2.5 | The React dashboard lists live flags and shows per-book line movement for an event | Screenshot in `results/demo/` |
 | F2.6 | `load/api.js` runs the fixed k6 load; `[L]` and the error rate come from its summary export, and the error rate is 0 | `results/api/summary.md` |
+| F2.7 | Arbitrage detection follows the definition above, ignores legs outside the freshness window, and returns the stake split; for any detected arbitrage, the equal-payout stakes return more than they cost for every outcome | Property-based tests (Hypothesis) + a unit test with one stale leg |
+| F2.8 | Arbitrage windows are opened and closed in the `arbitrages` table inside the normalizer transaction; `GET /arbs` serves open windows from the cache, and the dashboard lists them with margin and stake split | Integration test; screenshot in `results/demo/` |
+| F2.9 | `bin/live_report` writes `[A]`, `[D]`, and the margin distribution of arbitrage windows to `results/live/arbitrage.md` | File |
 
 ## Bullet 3: backtest and explanations
 
