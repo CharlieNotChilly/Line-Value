@@ -11,9 +11,9 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
   {LineValue -- Real-Time Odds Analytics \& Risk Platform}{Python, FastAPI, asyncio, PostgreSQL, Redis, React, Docker}
   {https://github.com/CharlieNotChilly/Line-Value}
 \resumeItemListStart
-  \resumeItem{Built an \textbf{async ingestion pipeline} that normalizes odds from \textbf{[B] sportsbooks} into a unified PostgreSQL schema through at-least-once \textbf{Redis Streams} consumers and idempotent upserts, processing \textbf{[R]} quotes/s in replay at \textbf{[F] ms} p95 ingest latency.}
-  \resumeItem{Designed a \textbf{pricing engine} that removes bookmaker margin to compute leave-one-out consensus probabilities and flags mispriced lines and \textbf{cross-book arbitrage}, served from \textbf{Redis}-cached FastAPI endpoints at \textbf{[L] ms} p99 under \textbf{[C]} concurrent clients.}
-  \resumeItem{Backtested flags on \textbf{[E]} live-captured events with a frozen threshold: flagged prices beat the closing consensus \textbf{[P]\%} of the time vs. \textbf{[Q]\%} for matched unflagged prices, with grounded \textbf{OpenAI} explanations for each flag.}
+  \resumeItem{Built an \textbf{async ingestion pipeline} that normalizes odds from \textbf{[B] sportsbooks} into one PostgreSQL schema through at-least-once \textbf{Redis Streams} consumers and idempotent upserts, processing \textbf{[R]} quotes/s in replay at \textbf{[F] ms} p95.}
+  \resumeItem{Designed a \textbf{pricing engine} that removes bookmaker margin and scans each updated event for \textbf{cross-book arbitrage}, detecting \textbf{[A]} arbitrage windows (median lifetime \textbf{[D] s}) and rejecting \textbf{[S]\%} of apparent ones as stale quotes.}
+  \resumeItem{Backtested mispricing flags on \textbf{[E]} live-captured events with a frozen threshold: flagged prices beat the closing consensus \textbf{[P]\%} of the time vs. \textbf{[Q]\%} for matched controls, served from Redis-cached FastAPI at \textbf{[L] ms} p99.}
 \resumeItemListEnd
 ```
 
@@ -62,6 +62,7 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
 - **Arbitrage**: for one event, take the best price for each outcome across all books, using only legs inside the freshness window. The margin is `m = 1 − Σ 1/best_price_i`. An arbitrage exists when `m ≥ m_min`. Stakes `s_i ∝ 1/best_price_i` give the same payout whichever outcome wins, and that payout exceeds the total stake by the factor `1/(1 − m)`.
 - **Arbitrage window**: the interval from the first snapshot where an event's arbitrage holds to the first later snapshot where it doesn't. Its **lifetime** is the length of that interval.
 - **`[A]`** = arbitrage windows detected during the live run; **`[D]`** = their median lifetime in seconds.
+- **`[S]`** = share of apparent arbitrages (margin ≥ `m_min` using the latest stored price for every book) that are rejected because at least one leg falls outside the freshness window.
 
 ## Bullet 1: ingestion
 
@@ -88,7 +89,7 @@ Bracketed values are **measured, never chosen**. Fill them only from files in `r
 | F2.6 | `load/api.js` runs the fixed k6 load; `[L]` and the error rate come from its summary export, and the error rate is 0 | `results/api/summary.md` |
 | F2.7 | Arbitrage detection follows the definition above, ignores legs outside the freshness window, and returns the stake split; for any detected arbitrage, the equal-payout stakes return more than they cost for every outcome | Property-based tests (Hypothesis) + a unit test with one stale leg |
 | F2.8 | Arbitrage windows are opened and closed in the `arbitrages` table inside the normalizer transaction; `GET /arbs` serves open windows from the cache, and the dashboard lists them with margin and stake split | Integration test; screenshot in `results/demo/` |
-| F2.9 | `bin/live_report` writes `[A]`, `[D]`, and the margin distribution of arbitrage windows to `results/live/arbitrage.md` | File |
+| F2.9 | `bin/live_report` writes `[A]`, `[D]`, `[S]`, and the margin distribution of arbitrage windows to `results/live/arbitrage.md` | File |
 
 ## Bullet 3: backtest and explanations
 

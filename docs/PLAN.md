@@ -152,7 +152,8 @@ written to results/live/gaps.csv, distinct bookmaker keys [B], quotes and
 quote changes per day, and ingest latency p50/p95/p99 [F] from
 raw_responses (committed_at - received_at). Write results/live/summary.md.
 Also write results/live/arbitrage.md: arbitrage windows [A], median lifetime
-[D] in seconds, and the margin distribution (F2.9).
+[D] in seconds, the stale-rejection share [S] (apparent arbitrages that fail
+the 60 s freshness rule), and the margin distribution (F2.9).
 Done when: it runs on the live database and every number in the summary
 comes from a query you can point to.
 ```

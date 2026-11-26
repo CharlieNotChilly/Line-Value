@@ -1,6 +1,6 @@
 # LineValue
 
-LineValue is a real-time odds analytics platform. It ingests pre-match moneyline odds from dozens of sportsbooks through The Odds API, removes each book's margin to estimate fair probabilities, and flags prices that beat the consensus of the other books. A backtest checks whether those flags beat the closing line more often than matched controls.
+LineValue is a real-time odds analytics platform. It ingests pre-match moneyline odds from dozens of sportsbooks through The Odds API, removes each book's margin to estimate fair probabilities, flags prices that beat the consensus of the other books, and detects **cross-book arbitrage**: games where the best prices across books guarantee a profit whichever side wins. A backtest checks whether flags beat the closing line more often than matched controls.
 
 **Stack:** Python 3.12, FastAPI, asyncio/httpx, PostgreSQL 16, Redis 7 (Streams + cache), React + TypeScript, Docker Compose, k6, OpenAI API
 
